@@ -1,0 +1,52 @@
+#!/bin/sh
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs devtmpfs /dev
+
+echo ""
+echo "=========================================="
+echo "PyTorch RISC-V QEMU System (Alpine Linux)"
+echo "=========================================="
+echo ""
+echo "Checking PyTorch libraries..."
+export LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH:-}
+
+if [ -f /usr/local/lib/libtorch.so ]; then
+  echo "✓ PyTorch libraries found in /usr/local/lib/"
+  ls -lh /usr/local/lib/libtorch*.so 2>/dev/null || true
+else
+  echo "✗ PyTorch libraries NOT found"
+fi
+
+echo ""
+echo "System ready. Running Qwen demo (MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-1}) and dropping to shell..."
+echo ""
+
+HOST_MOUNT=/mnt/host
+mkdir -p "$HOST_MOUNT"
+if ! grep -qs 'hostshare' /proc/mounts; then
+  if ! mount -t 9p -o trans=virtio,version=9p2000.L hostshare "$HOST_MOUNT" 2>/dev/null; then
+    echo "[warn] Failed to mount hostshare; Qwen demo will be skipped"
+  fi
+fi
+
+if grep -qs 'hostshare' /proc/mounts; then
+  MODEL_TS="$HOST_MOUNT/qwen3_0_6b.ts"
+  if [ -f "$MODEL_TS" ]; then
+    QWEN_MODEL_PATH="$MODEL_TS" \
+    MODEL_ARCHIVE="$MODEL_TS" \
+    /usr/local/bin/run_qwen_demo.sh || echo "[warn] Qwen demo exited with status $?"
+  else
+    echo "[info] Model not found at $MODEL_TS; skipping demo"
+  fi
+else
+  echo "[info] hostshare not mounted; skipping demo"
+fi
+
+echo ""
+echo "Shell ready. To rerun:"
+echo "  QWEN_MODEL_PATH=/mnt/host/qwen3_0_6b.ts \\
+    MODEL_ARCHIVE=/mnt/host/qwen3_0_6b.ts /usr/local/bin/run_qwen_demo.sh"
+echo ""
+
+exec /bin/sh

@@ -1,0 +1,11 @@
+# Build artifacts and generated assets
+build/
+/rootfs*/
+/src/
+/deps/
+models/qwen3_0_6b.ts*
+initramfs*.cpio.gz
+sysroot/
+toolchains/
+*.log
+*.tmp
