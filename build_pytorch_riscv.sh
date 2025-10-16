@@ -138,6 +138,8 @@ cmake -S "$SOURCE_DIR/third_party/sleef" \
       -B "$SLEEF_BUILD" \
       -GNinja \
       -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER="$(command -v gcc)" \
+      -DCMAKE_CXX_COMPILER="$(command -v g++)" \
       -DCMAKE_INSTALL_PREFIX="$SLEEF_INSTALL" \
       -DSLEEF_BUILD_SHARED_LIBS=OFF \
       -DSLEEF_BUILD_TESTS=OFF \
@@ -145,6 +147,7 @@ cmake -S "$SOURCE_DIR/third_party/sleef" \
       -DSLEEF_BUILD_QUAD=OFF \
       -DSLEEF_BUILD_SCALAR_LIB=OFF \
       -DSLEEF_BUILD_GNUABI_LIBS=ON \
+      -DSLEEF_BUILD_GNUABI=OFF \
       -DSLEEF_BUILD_BENCH=OFF
 cmake --build "$SLEEF_BUILD" --target install --parallel "$JOBS"
 
