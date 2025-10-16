@@ -42,6 +42,7 @@ PYTORCH_CLONE_URL="https://github.com/pytorch/pytorch.git"
 OPENSBI_VERSION="v1.7"
 LINUX_VERSION="v6.10.5"
 ALPINE_VERSION="3.21.0"
+LINUX_REPO="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
 
 # Colors for output
 RED='\033[0;31m'
@@ -246,12 +247,35 @@ log_info "=========================================="
 log_info "Step 3: Preparing Linux kernel sources"
 log_info "=========================================="
 
-if [ ! -d "$SRC_DIR/linux" ]; then
-    log_info "Cloning Linux kernel..."
-    cd "$SRC_DIR"
-    git clone --depth 1 --branch "$LINUX_VERSION" https://github.com/torvalds/linux.git
+LINUX_SRC="$SRC_DIR/linux"
+LINUX_GIT="$LINUX_SRC/.git"
+NEED_KERNEL_CLONE=0
+if [ ! -d "$LINUX_GIT" ]; then
+    NEED_KERNEL_CLONE=1
 else
-    log_info "Linux kernel already cloned"
+    cd "$LINUX_SRC"
+    if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+        log_warn "Existing Linux tree has no commit; re-cloning"
+        NEED_KERNEL_CLONE=1
+    else
+        CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || echo "")
+        if [ "$CURRENT_REMOTE" != "$LINUX_REPO" ]; then
+            log_warn "Updating Linux kernel remote to $LINUX_REPO"
+            git remote set-url origin "$LINUX_REPO"
+        fi
+        git fetch --depth 1 origin "$LINUX_VERSION"
+        git checkout --force --detach FETCH_HEAD
+        git clean -fdx
+    fi
+    cd "$PROJECT_ROOT"
+fi
+
+if [ $NEED_KERNEL_CLONE -eq 1 ]; then
+    log_info "Cloning Linux kernel from $LINUX_REPO (ref $LINUX_VERSION)..."
+    rm -rf "$LINUX_SRC"
+    git clone --depth 1 --branch "$LINUX_VERSION" "$LINUX_REPO" "$LINUX_SRC"
+else
+    log_info "Linux kernel already cloned; ensuring $LINUX_VERSION is checked out"
 fi
 
 # ============================================================================
@@ -342,6 +366,14 @@ else
     log_warn "Toolchain sysroot not found, PyTorch may need additional dependencies"
 fi
 
+# Apply rootfs overlay if present
+OVERLAY_DIR="$PROJECT_ROOT/overlays/rootfs_alpine"
+if [ -d "$OVERLAY_DIR" ]; then
+    log_info "Applying rootfs overlay from $OVERLAY_DIR"
+    (cd "$OVERLAY_DIR" && tar -cf - .) | (cd "$ROOTFS_DIR" && tar -xf -)
+    log_info "✓ Rootfs overlay applied"
+fi
+
 # ============================================================================
 # Step 8: Create init script
 # ============================================================================
@@ -349,7 +381,8 @@ log_info "=========================================="
 log_info "Step 8: Creating init script"
 log_info "=========================================="
 
-cat > "$ROOTFS_DIR/init" << 'EOF'
+if [ ! -f "$ROOTFS_DIR/init" ]; then
+    cat > "$ROOTFS_DIR/init" << 'EOF'
 #!/bin/sh
 mount -t proc none /proc
 mount -t sysfs none /sys
@@ -376,9 +409,12 @@ echo ""
 
 exec /bin/sh
 EOF
+    log_info "✓ Default init script created"
+else
+    log_info "Init script provided by overlay"
+fi
 
 chmod +x "$ROOTFS_DIR/init"
-log_info "✓ Init script created"
 
 # ============================================================================
 # Step 9: Create initramfs

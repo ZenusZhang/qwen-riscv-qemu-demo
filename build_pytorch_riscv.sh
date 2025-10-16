@@ -161,6 +161,41 @@ cmake -S "$SOURCE_DIR/third_party/protobuf/cmake" \
 cmake --build "$PROTOBUF_BUILD" --target protoc --parallel "$JOBS"
 PROTOC_LEGACY="$PROTOBUF_BUILD/protoc-3.13.0.0"
 
+ONNX_SCHEMA_HEADER="$SOURCE_DIR/third_party/onnx/onnx/defs/schema.h"
+if [[ -f "$ONNX_SCHEMA_HEADER" ]] && ! grep -q 'onnx_pb.h' "$ONNX_SCHEMA_HEADER"; then
+  echo "Ensuring onnx schema.h includes onnx_pb.h"
+  env ONNX_SCHEMA_HEADER="$ONNX_SCHEMA_HEADER" python3 - <<'PY_SCHEMA'
+import os
+from pathlib import Path
+header = Path(os.environ['ONNX_SCHEMA_HEADER'])
+text = header.read_text()
+needle = '#include "onnx/defs/shape_inference.h"
+
+'
+if needle in text:
+    replacement = '#include "onnx/defs/shape_inference.h"
+#include "onnx/onnx_pb.h"
+
+'
+    text = text.replace(needle, replacement, 1)
+    header.write_text(text)
+PY_SCHEMA
+fi
+
+CPUINFO_API_C="$SOURCE_DIR/third_party/cpuinfo/src/api.c"
+if [[ -f "$CPUINFO_API_C" ]] && ! grep -q "#define _GNU_SOURCE" "$CPUINFO_API_C"; then
+  echo "Patching cpuinfo api.c to define _GNU_SOURCE for syscall()"
+  env CPUINFO_API_C="$CPUINFO_API_C" python3 - <<'PY_CPUINFO'
+import os
+from pathlib import Path
+api_path = Path(os.environ['CPUINFO_API_C'])
+text = api_path.read_text()
+lines = text.splitlines()
+if '#define _GNU_SOURCE' not in lines[:5]:
+    api_path.write_text('#define _GNU_SOURCE\n' + text)
+PY_CPUINFO
+fi
+
 cmake -S "$SOURCE_DIR" \
       -B "$PYTORCH_BUILD" \
       -GNinja \
