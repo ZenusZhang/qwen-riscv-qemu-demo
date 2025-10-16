@@ -20,3 +20,4 @@ What we should do is to run qwen by pytorch in qemu env.
 - After each modification, commit and push the code using gh.
 - Ran the Qwen3 demo end-to-end in QEMU after repacking the initramfs with toolchain sysroot libraries and taught `build_pytorch_qemu_riscv.sh` to stage those libs automatically.
 - Hardened the protobuf stage to reuse only host-runnable `protoc` binaries and fall back to rebuilding with explicit host compilers when a stale RISC-V executable is detected.
+- Disabled SLEEF's pure-CFMA path (which tripped hosts lacking `FP_FAST_FMA`) and now fail the build if libtorch shared libs are missing so we can't silently ship an empty install prefix.

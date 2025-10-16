@@ -167,6 +167,7 @@ cmake -S "$SOURCE_DIR/third_party/sleef" \
       -DSLEEF_BUILD_SCALAR_LIB=OFF \
       -DSLEEF_BUILD_GNUABI_LIBS=ON \
       -DSLEEF_BUILD_GNUABI=OFF \
+      -DENABLE_PURECFMA_SCALAR=OFF \
       -DSLEEF_BUILD_BENCH=OFF
 cmake --build "$SLEEF_BUILD" --target install --parallel "$JOBS"
 
@@ -261,8 +262,13 @@ cat >"$PYTORCH_BUILD/onnx/onnx_pb.h" <<'ONNXHDR'
 #include "../third_party/onnx/onnx/onnx_onnx_torch-ml.pb.h"
 ONNXHDR
 
-if ! ninja -C "$PYTORCH_BUILD" install --parallel "$JOBS"; then
-  echo "warning: PyTorch install step reported issues (common when ONNX symbols are missing); continuing" >&2
+echo "Installing PyTorch (ninja install)"
+ninja -C "$PYTORCH_BUILD" install --parallel "$JOBS"
+
+TORCH_LIB_DIR="$INSTALL_PREFIX/lib"
+if [[ ! -f "$TORCH_LIB_DIR/libtorch.so" || ! -f "$TORCH_LIB_DIR/libtorch_cpu.so" ]]; then
+  echo "error: libtorch shared libraries missing from $TORCH_LIB_DIR after install" >&2
+  exit 1
 fi
 
 PROTOBUF_ONNX_VERSION="22.3"
