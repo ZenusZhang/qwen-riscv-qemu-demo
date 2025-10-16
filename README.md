@@ -4,46 +4,29 @@ Complete bootable QEMU RISC-V system with PyTorch libraries for full system emul
 
 ## Quick Start
 
-### Prerequisites
-```bash
-# Install required tools (Ubuntu/Debian)
-sudo apt-get install -y \
-    qemu-system-misc \
-    build-essential \
-    bison flex bc \
-    libssl-dev libelf-dev \
-    wget tar cpio gzip git
-```
-
-### Automated Build
-
-Use the build script to automatically build everything:
-
-```bash
-./build_pytorch_qemu_riscv.sh --pytorch /path/to/pytorch/install
-```
-
-This will:
-1. Clone and build OpenSBI firmware
-2. Clone and build Linux kernel
-3. Download Alpine Linux RISC-V rootfs
-4. Copy PyTorch libraries
-5. Create initramfs
-6. Generate QEMU launch script
-
-### Run the System
-
-```bash
-./run_qemu.sh
-```
-
-Configuration options:
-```bash
-MEMORY=4G ./run_qemu.sh    # Set memory (default: 2G)
-SMP=8 ./run_qemu.sh        # Set CPUs (default: 4)
-```
-
-To exit: Press `Ctrl-A` then `X`
+1. **Install prerequisites** (Ubuntu/Debian example):
+   ```bash
+   sudo apt-get install -y qemu-system-misc build-essential bison flex bc \
+       libssl-dev libelf-dev wget tar cpio gzip git cmake ninja-build
+   ```
+2. **Build (or fetch) libtorch for riscv64** – optional if you already have a cross-built install:
+   ```bash
+   ./build_pytorch_riscv.sh --toolchain /path/to/riscv-toolchain \
+       --install artifacts/pytorch-install
+   ```
+   Use `--force-fetch` to reclone PyTorch or `--branch`/`--clone-url` to select another revision. The resulting install prefix is what the main builder consumes.
+3. **Build firmware/kernel/initramfs**:
+   ```bash
+   ./build_pytorch_qemu_riscv.sh --build-pytorch --toolchain /path/to/riscv-toolchain \
+       --pytorch /absolute/path/to/libtorch/install
+   ```
+   Drop `--build-pytorch` if you are pointing at an existing libtorch directory. The script emits `build/opensbi/.../fw_jump.bin`, `build/linux/.../Image`, and `initramfs_alpine_small.cpio.gz`.
+4. **Stage the model**: copy `qwen3_0_6b.ts.gz` (and optionally `qwen3_0_6b.ts`) into `models/`.
+5. **Launch QEMU**:
+   ```bash
+   ./run_qemu_qwen.sh
+   ```
+   The initramfs mounts `/mnt/host`, runs the Qwen3 demo with `MAX_NEW_TOKENS=1`, and then drops you into a shell. Manual rerun instructions are printed at boot.
 
 ## Manual Build
 

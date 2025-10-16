@@ -18,16 +18,28 @@ The launch script expects the following images:
 - `build/linux/arch/riscv/boot/Image`
 - `initramfs_alpine_small.cpio.gz`
 
-If they already exist, skip this step. Otherwise generate them either with the automated script or the manual instructions that live in this repo.
+If they already exist, skip this step. Otherwise generate them either with the automated scripts or the manual instructions that live in this repo.
 
-### 2.1 Automated build (recommended)
+### 2.1 Build libtorch for riscv64 (optional)
+
+If you do not already have a riscv64 libtorch install, run:
+
+```bash
+./build_pytorch_riscv.sh --toolchain /path/to/riscv/toolchain \
+    --install artifacts/pytorch-install
+```
+
+Use `--force-fetch` to reclone PyTorch or `--branch`/`--clone-url` to control the checkout. The resulting install prefix is what you pass via `--pytorch` to the system builder below.
+
+### 2.2 Automated system build (recommended)
 
 ```bash
 cd pytorch/riscv_qemu_demo
-./build_pytorch_qemu_riscv.sh --pytorch /path/to/riscv-pytorch/install [--toolchain /path/to/toolchain]
+./build_pytorch_qemu_riscv.sh --build-pytorch --toolchain /path/to/toolchain \
+    --pytorch /absolute/path/to/libtorch/install
 ```
 
-The script clones OpenSBI and the Linux kernel, builds them for RISC-V, downloads Alpine, stages the PyTorch libraries, and produces the initramfs. After it completes, verify the outputs:
+Drop `--build-pytorch` if you are supplying a prebuilt libtorch directory. The script clones OpenSBI and the Linux kernel, builds them for RISC-V, downloads Alpine, stages the PyTorch libraries, and produces the initramfs. After it completes, verify the outputs:
 
 ```bash
 ls -lh build/opensbi/platform/generic/firmware/fw_jump.bin
@@ -35,7 +47,7 @@ ls -lh build/linux/arch/riscv/boot/Image
 ls -lh initramfs_alpine_small.cpio.gz
 ```
 
-### 2.2 Manual assembly
+### 2.3 Manual assembly
 
 If you need to rebuild components by hand, follow `BUILD_INSTRUCTIONS.md` within this directory. The key points are:
 

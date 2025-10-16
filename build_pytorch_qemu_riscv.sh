@@ -15,11 +15,15 @@
 #   ./build_pytorch_qemu_riscv.sh [OPTIONS]
 #
 # Options:
-#   --toolchain PATH    Path to RISC-V toolchain (default: /workspace/riscv64-unknown-linux_gnu_14.2.0)
-#   --pytorch PATH      Path to PyTorch install directory (required)
-#   --jobs N           Number of parallel build jobs (default: nproc)
-#   --clean            Clean build directories before building
-#   --help             Show this help message
+#   --toolchain PATH           Path to RISC-V toolchain (default: /workspace/riscv64-unknown-linux_gnu_14.2.0)
+#   --pytorch PATH             Path to PyTorch install directory (set automatically when --build-pytorch is used)
+#   --build-pytorch            Build PyTorch for riscv64 using build_pytorch_riscv.sh
+#   --pytorch-source PATH      Optional PyTorch source directory for the build step
+#   --pytorch-branch REF       Git branch/tag/commit to checkout when building PyTorch
+#   --pytorch-clone-url URL    Alternate PyTorch remote when cloning
+#   --jobs N                   Number of parallel build jobs (default: nproc)
+#   --clean                    Clean build directories before building
+#   --help                     Show this help message
 #
 
 set -euo pipefail
@@ -29,6 +33,10 @@ TOOLCHAIN_PATH="${TOOLCHAIN_PATH:-/workspace/riscv64-unknown-linux_gnu_14.2.0}"
 PYTORCH_INSTALL=""
 BUILD_JOBS=$(nproc)
 CLEAN_BUILD=0
+BUILD_PYTORCH=0
+PYTORCH_SOURCE_DIR=""
+PYTORCH_BRANCH="v2.3.0"
+PYTORCH_CLONE_URL="https://github.com/pytorch/pytorch.git"
 
 # Versions
 OPENSBI_VERSION="v1.7"
@@ -70,6 +78,22 @@ while [[ $# -gt 0 ]]; do
             PYTORCH_INSTALL="$2"
             shift 2
             ;;
+        --build-pytorch)
+            BUILD_PYTORCH=1
+            shift
+            ;;
+        --pytorch-source)
+            PYTORCH_SOURCE_DIR="$2"
+            shift 2
+            ;;
+        --pytorch-branch)
+            PYTORCH_BRANCH="$2"
+            shift 2
+            ;;
+        --pytorch-clone-url)
+            PYTORCH_CLONE_URL="$2"
+            shift 2
+            ;;
         --jobs)
             BUILD_JOBS="$2"
             shift 2
@@ -90,15 +114,34 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate requirements
+if [ $BUILD_PYTORCH -eq 1 ] && [ -z "$PYTORCH_INSTALL" ]; then
+    PYTORCH_INSTALL="$PWD/artifacts/pytorch-install"
+fi
+
 if [ -z "$PYTORCH_INSTALL" ]; then
     log_error "PyTorch install directory not specified"
-    echo "Use: $0 --pytorch /path/to/pytorch/install"
+    echo "Use: $0 --pytorch /path/to/pytorch/install (or pass --build-pytorch)"
     exit 1
 fi
 
 if [ ! -d "$TOOLCHAIN_PATH" ]; then
     log_error "RISC-V toolchain not found at: $TOOLCHAIN_PATH"
     exit 1
+fi
+
+if [ $BUILD_PYTORCH -eq 1 ]; then
+    log_info "Building PyTorch for riscv64 (install -> $PYTORCH_INSTALL)"
+    BUILD_CMD=("$PWD/build_pytorch_riscv.sh" --toolchain "$TOOLCHAIN_PATH" --install "$PYTORCH_INSTALL" --jobs "$BUILD_JOBS")
+    if [ -n "$PYTORCH_SOURCE_DIR" ]; then
+        BUILD_CMD+=(--source "$PYTORCH_SOURCE_DIR")
+    fi
+    if [ -n "$PYTORCH_BRANCH" ]; then
+        BUILD_CMD+=(--branch "$PYTORCH_BRANCH")
+    fi
+    if [ -n "$PYTORCH_CLONE_URL" ]; then
+        BUILD_CMD+=(--clone-url "$PYTORCH_CLONE_URL")
+    fi
+    "${BUILD_CMD[@]}"
 fi
 
 if [ ! -d "$PYTORCH_INSTALL" ]; then
@@ -141,6 +184,7 @@ log_info "  Toolchain: $TOOLCHAIN_PATH"
 log_info "  PyTorch: $PYTORCH_INSTALL"
 log_info "  Build jobs: $BUILD_JOBS"
 log_info "  Clean build: $CLEAN_BUILD"
+log_info "  Build PyTorch: $BUILD_PYTORCH"
 
 # Clean if requested
 if [ $CLEAN_BUILD -eq 1 ]; then

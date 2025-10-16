@@ -3,6 +3,7 @@ build/
 /rootfs*/
 /src/
 /deps/
+/artifacts/
 models/qwen3_0_6b.ts*
 initramfs*.cpio.gz
 sysroot/
