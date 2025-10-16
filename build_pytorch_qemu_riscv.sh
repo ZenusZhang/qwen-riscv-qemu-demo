@@ -358,12 +358,46 @@ else
 fi
 
 log_info "Copying system libraries from toolchain..."
-TOOLCHAIN_SYSROOT="$TOOLCHAIN_PATH/sysroot/lib64/lp64d"
-if [ -d "$TOOLCHAIN_SYSROOT" ]; then
-    cp -r "$TOOLCHAIN_SYSROOT"/* "$ROOTFS_DIR/lib/" 2>&1 | head -10
-    log_info "✓ System libraries copied"
+mkdir -p "$ROOTFS_DIR/lib" "$ROOTFS_DIR/usr/lib"
+SYSROOT_BASE="$TOOLCHAIN_PATH/sysroot"
+SYSROOT_LIB_DIRS=(
+    "$SYSROOT_BASE/lib64/lp64d"
+    "$SYSROOT_BASE/lib64"
+    "$SYSROOT_BASE/lib"
+)
+SYSROOT_USR_LIB_DIRS=(
+    "$SYSROOT_BASE/usr/lib64/lp64d"
+    "$SYSROOT_BASE/usr/lib64"
+    "$SYSROOT_BASE/usr/lib"
+)
+copied_any=0
+for dir in "${SYSROOT_LIB_DIRS[@]}"; do
+    if [ -d "$dir" ]; then
+        cp -a "$dir"/. "$ROOTFS_DIR/lib/"
+        copied_any=1
+    fi
+done
+for dir in "${SYSROOT_USR_LIB_DIRS[@]}"; do
+    if [ -d "$dir" ]; then
+        cp -a "$dir"/. "$ROOTFS_DIR/usr/lib/"
+        copied_any=1
+    fi
+done
+
+if [ $copied_any -eq 1 ]; then
+    log_info "✓ Toolchain system libraries copied"
 else
-    log_warn "Toolchain sysroot not found, PyTorch may need additional dependencies"
+    log_warn "Toolchain sysroot libraries not found; PyTorch binaries may miss dependencies"
+fi
+
+if [ ! -f "$ROOTFS_DIR/lib/ld-linux-riscv64-lp64d.so.1" ]; then
+    loader_path="${SYSROOT_BASE}/lib/ld-linux-riscv64-lp64d.so.1"
+    if [ -f "$loader_path" ]; then
+        cp "$loader_path" "$ROOTFS_DIR/lib/"
+        log_info "✓ Installed RISC-V dynamic loader"
+    else
+        log_warn "RISC-V dynamic loader ld-linux-riscv64-lp64d.so.1 not found in toolchain"
+    fi
 fi
 
 # Apply rootfs overlay if present
