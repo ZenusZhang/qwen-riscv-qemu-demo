@@ -79,7 +79,7 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
   git clone --recursive --depth 1 --branch "$BRANCH" "$CLONE_URL" "$SOURCE_DIR"
 else
   echo "Using existing PyTorch source at $SOURCE_DIR"
-  (cd "$SOURCE_DIR" && git fetch --tags && git checkout "$BRANCH" && git submodule update --init --recursive)
+  # (cd "$SOURCE_DIR" && git fetch --tags && git checkout "$BRANCH" && git submodule update --init --recursive)
 fi
 
 (cd "$SOURCE_DIR" && git submodule update --init --recursive third_party/sleef third_party/protobuf third_party/onnx)
@@ -159,7 +159,7 @@ cmake -S "$SOURCE_DIR/third_party/protobuf/cmake" \
       -Dprotobuf_BUILD_CONFORMANCE=OFF \
       -Dprotobuf_BUILD_EXAMPLES=OFF
 cmake --build "$PROTOBUF_BUILD" --target protoc --parallel "$JOBS"
-PROTOC_NATIVE="$PROTOBUF_BUILD/protoc-3.13.0.0"
+PROTOC_LEGACY="$PROTOBUF_BUILD/protoc-3.13.0.0"
 
 cmake -S "$SOURCE_DIR" \
       -B "$PYTORCH_BUILD" \
@@ -188,9 +188,9 @@ cmake -S "$SOURCE_DIR" \
       -DBUILD_TEST=OFF \
       -DINTERN_BUILD_ATEN_OPS=OFF \
       -DNATIVE_BUILD_DIR="$SLEEF_BUILD" \
-      -DCAFFE2_CUSTOM_PROTOC_EXECUTABLE="$PROTOC_NATIVE" \
-      -DPROTOBUF_PROTOC_EXECUTABLE="$PROTOC_NATIVE" \
-      -DONNX_CUSTOM_PROTOC_EXECUTABLE="$PROTOC_NATIVE" \
+      -DCAFFE2_CUSTOM_PROTOC_EXECUTABLE="$PROTOC_LEGACY" \
+      -DPROTOBUF_PROTOC_EXECUTABLE="$PROTOC_LEGACY" \
+      -DONNX_CUSTOM_PROTOC_EXECUTABLE="$PROTOC_LEGACY" \
       -DCMAKE_C_FLAGS="--sysroot=${TOOLCHAIN_ROOT}/sysroot -D__riscv_v_intrinsic=0" \
       -DCMAKE_CXX_FLAGS="--sysroot=${TOOLCHAIN_ROOT}/sysroot -D__riscv_v_intrinsic=0"
 
@@ -205,6 +205,72 @@ if ! ninja -C "$PYTORCH_BUILD" install --parallel "$JOBS"; then
   echo "warning: PyTorch install step reported issues (common when ONNX symbols are missing); continuing" >&2
 fi
 
+PROTOBUF_ONNX_VERSION="22.3"
+PROTOBUF_ONNX_ZIP="$BUILD_ROOT/protoc-${PROTOBUF_ONNX_VERSION}-linux-x86_64.zip"
+PROTOBUF_ONNX_DIR="$BUILD_ROOT/protoc-${PROTOBUF_ONNX_VERSION}-host"
+PROTOC_ONNX_BIN="$PROTOBUF_ONNX_DIR/bin/protoc"
+PROTOC_ONNX_WRAPPER="$PROTOBUF_ONNX_DIR/protoc.sh"
+
+if [[ ! -x "$PROTOC_ONNX_WRAPPER" ]]; then
+  echo "Fetching host protoc ${PROTOBUF_ONNX_VERSION}"
+  if [[ ! -f "$PROTOBUF_ONNX_ZIP" ]]; then
+    curl -fL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_ONNX_VERSION}/protoc-${PROTOBUF_ONNX_VERSION}-linux-x86_64.zip" -o "$PROTOBUF_ONNX_ZIP"
+  fi
+  rm -rf "$PROTOBUF_ONNX_DIR"
+  mkdir -p "$PROTOBUF_ONNX_DIR"
+  env PROTOBUF_ONNX_ZIP="$PROTOBUF_ONNX_ZIP" PROTOBUF_ONNX_DIR="$PROTOBUF_ONNX_DIR" python3 - <<'PY_UNZIP'
+import os
+import zipfile
+
+zip_path = os.environ['PROTOBUF_ONNX_ZIP']
+out_dir = os.environ['PROTOBUF_ONNX_DIR']
+with zipfile.ZipFile(zip_path) as zf:
+    zf.extractall(out_dir)
+PY_UNZIP
+  chmod +x "$PROTOC_ONNX_BIN"
+  cat >"$PROTOC_ONNX_WRAPPER" <<'PROTOC_WRAPPER'
+#!/usr/bin/env bash
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export LD_LIBRARY_PATH="${ROOT_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+exec "${ROOT_DIR}/bin/protoc" "$@"
+PROTOC_WRAPPER
+  chmod +x "$PROTOC_ONNX_WRAPPER"
+fi
+if [[ ! -x "$PROTOC_ONNX_BIN" ]]; then
+  chmod +x "$PROTOC_ONNX_BIN"
+fi
+
+PROTOC_ONNX="$PROTOC_ONNX_WRAPPER"
+
+
+
+ONNX_CMAKE_FILE="$SOURCE_DIR/third_party/onnx/CMakeLists.txt"
+if [[ -f "$ONNX_CMAKE_FILE" ]]; then
+  env ONNX_CMAKE_FILE="$ONNX_CMAKE_FILE" python3 - <<'PY_ONNX'
+import os
+from pathlib import Path
+
+cmake = Path(os.environ['ONNX_CMAKE_FILE'])
+content = cmake.read_text()
+needle = '    set(ONNX_PROTOC_EXECUTABLE $<TARGET_FILE:protobuf::protoc>)\n    set(Protobuf_VERSION "4.22.3")\n'
+if needle not in content:
+    raise SystemExit(0)
+replacement = (
+    '    set(ONNX_PROTOC_EXECUTABLE $<TARGET_FILE:protobuf::protoc>)\n'
+    '    if(ONNX_CUSTOM_PROTOC_EXECUTABLE AND EXISTS "${ONNX_CUSTOM_PROTOC_EXECUTABLE}")\n'
+    '      message(STATUS "Overriding protoc with ${ONNX_CUSTOM_PROTOC_EXECUTABLE}")\n'
+    '      set(ONNX_PROTOC_EXECUTABLE "${ONNX_CUSTOM_PROTOC_EXECUTABLE}")\n'
+    '    endif()\n'
+    '    set(Protobuf_VERSION "4.22.3")\n'
+)
+if replacement.strip() in content:
+    raise SystemExit(0)
+content = content.replace(needle, replacement, 1)
+cmake.write_text(content)
+PY_ONNX
+fi
+
+
 cmake -S "$SOURCE_DIR/third_party/onnx" \
       -B "$ONNX_BUILD" \
       -GNinja \
@@ -215,9 +281,28 @@ cmake -S "$SOURCE_DIR/third_party/onnx" \
       -DONNX_ML=ON \
       -DONNX_BUILD_TESTS=OFF \
       -DONNX_USE_LITE_PROTO=OFF \
-      -DProtobuf_PROTOC_EXECUTABLE="$PROTOC_NATIVE" \
-      -DPROTOBUF_PROTOC_EXECUTABLE="$PROTOC_NATIVE" \
+      -DProtobuf_PROTOC_EXECUTABLE="$PROTOC_ONNX" \
+      -DPROTOBUF_PROTOC_EXECUTABLE="$PROTOC_ONNX" \
+      -DONNX_CUSTOM_PROTOC_EXECUTABLE="$PROTOC_ONNX" \
       -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
+PROTOBUF_PORT_HEADER="$ONNX_BUILD/_deps/protobuf-src/src/google/protobuf/port.h"
+if [[ -f "$PROTOBUF_PORT_HEADER" ]] && ! grep -q '<cstdint>' "$PROTOBUF_PORT_HEADER"; then
+  echo "Patching protobuf port.h to add <cstdint> include"
+  env PROTOBUF_PORT_HEADER="$PROTOBUF_PORT_HEADER" python3 - <<'PY_PORT'
+import os
+from pathlib import Path
+header = Path(os.environ['PROTOBUF_PORT_HEADER'])
+text = header.read_text()
+needle = "#include <type_traits>\n"
+insert = "#include <type_traits>\n#include <cstdint>\n"
+if insert in text:
+    raise SystemExit(0)
+if needle not in text:
+    raise SystemExit('Failed to locate <type_traits> include in port.h')
+header.write_text(text.replace(needle, insert, 1))
+PY_PORT
+fi
+
 cmake --build "$ONNX_BUILD" --target install --parallel "$JOBS"
 
 cat <<EOF
