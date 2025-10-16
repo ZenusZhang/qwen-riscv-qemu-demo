@@ -87,10 +87,29 @@ fi
 SLEEF_BUILD="$BUILD_ROOT/sleef-native"
 SLEEF_INSTALL="$BUILD_ROOT/sleef-native-install"
 PROTOBUF_BUILD="$BUILD_ROOT/protobuf-native"
+PROTOC_LEGACY="$PROTOBUF_BUILD/protoc-3.13.0.0"
 PYTORCH_BUILD="$BUILD_ROOT/pytorch"
 ONNX_BUILD="$BUILD_ROOT/onnx-shared"
 TOOLCHAIN_DIR="$BUILD_ROOT/toolchains"
 mkdir -p "$SLEEF_BUILD" "$SLEEF_INSTALL" "$PROTOBUF_BUILD" "$PYTORCH_BUILD" "$ONNX_BUILD" "$TOOLCHAIN_DIR"
+
+HOST_CC="$(command -v gcc)"
+HOST_CXX="$(command -v g++)"
+
+if [[ -z "$HOST_CC" || -z "$HOST_CXX" ]]; then
+  echo "error: host gcc/g++ not found in PATH" >&2
+  exit 1
+fi
+
+if [[ -x "$PROTOC_LEGACY" ]]; then
+  if "$PROTOC_LEGACY" --version >/dev/null 2>&1; then
+    log_info "Reusing existing host protoc binary at $PROTOC_LEGACY"
+  else
+    log_warn "Stale non-host protoc detected at $PROTOC_LEGACY; rebuilding"
+    rm -rf "$PROTOBUF_BUILD"
+    mkdir -p "$PROTOBUF_BUILD"
+  fi
+fi
 
 cat >"$TOOLCHAIN_DIR/riscv64.cmake" <<TOOL
 set(CMAKE_SYSTEM_NAME Linux)
@@ -155,11 +174,17 @@ cmake -S "$SOURCE_DIR/third_party/protobuf/cmake" \
       -B "$PROTOBUF_BUILD" \
       -GNinja \
       -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER="$HOST_CC" \
+      -DCMAKE_CXX_COMPILER="$HOST_CXX" \
       -Dprotobuf_BUILD_TESTS=OFF \
       -Dprotobuf_BUILD_CONFORMANCE=OFF \
       -Dprotobuf_BUILD_EXAMPLES=OFF
 cmake --build "$PROTOBUF_BUILD" --target protoc --parallel "$JOBS"
-PROTOC_LEGACY="$PROTOBUF_BUILD/protoc-3.13.0.0"
+
+if ! "$PROTOC_LEGACY" --version >/dev/null 2>&1; then
+  log_error "Failed to build a runnable host protoc at $PROTOC_LEGACY"
+  exit 1
+fi
 
 ONNX_SCHEMA_HEADER="$SOURCE_DIR/third_party/onnx/onnx/defs/schema.h"
 if [[ -f "$ONNX_SCHEMA_HEADER" ]] && ! grep -q 'onnx_pb.h' "$ONNX_SCHEMA_HEADER"; then
